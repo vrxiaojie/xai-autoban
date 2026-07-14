@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: golang:1.24-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build Linux amd64 plugin
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+            -buildvcs=false \
+            -buildmode=c-shared \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o dist/xai-autoban-linux-amd64.so \
+            .
+          sha256sum dist/xai-autoban-linux-amd64.so > dist/SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/xai-autoban-linux-amd64.so
+            dist/SHA256SUMS
