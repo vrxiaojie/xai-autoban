@@ -102,7 +102,7 @@ plugins:
 重启 CLIProxyAPI 后，日志应包含：
 
 ```text
-pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban version=1.0.0
+pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban version=1.0.1
 ```
 
 ## 管理面板
