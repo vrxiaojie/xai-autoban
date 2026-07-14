@@ -37,7 +37,7 @@ dist/xai-autoban-linux-amd64.so
 
 ## 安装
 
-按服务器架构复制并重命名动态库：
+下载与服务器架构对应的文件后，必须将文件名改为 `xai-autoban.so`，再复制到 CPA 插件目录：
 
 ```text
 amd64: plugins/linux/amd64/xai-autoban.so
@@ -70,8 +70,8 @@ remote-management:
 plugins:
   enabled: true
   configs:
-  # 下方插件名称需要和你下载的.so文件名一致
-    xai-autoban-linux-amd64:
+  # 插件名称需要和安装后的 .so 文件名一致
+    xai-autoban:
       enabled: true
       priority: 200
       management-url: http://127.0.0.1:8317
