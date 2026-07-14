@@ -30,15 +30,36 @@ func TestParseRuntimeConfig(t *testing.T) {
 
 func TestPublicStatusPageHasNoManagementAuthentication(t *testing.T) {
 	page := statusPage()
-	for _, forbidden := range []string{"Authorization: Bearer", "Management key", "/v0/management/plugins/xai-autoban"} {
+	for _, forbidden := range []string{"Authorization: Bearer", "Management key", "/v0/management/plugins/xai-autoban", "/v0/resource/plugins/xai-autoban"} {
 		if strings.Contains(page, forbidden) {
 			t.Fatalf("page still contains authenticated management flow: %q", forbidden)
 		}
 	}
-	for _, required := range []string{"/v0/resource/plugins/xai-autoban", "unbanSelected", "unbanStatus", "autoRefresh"} {
+	for _, required := range []string{"window.location.pathname", "unbanSelected", "unbanStatus", "autoRefresh"} {
 		if !strings.Contains(page, required) {
 			t.Fatalf("page is missing %q", required)
 		}
+	}
+}
+
+func TestResourceRoutesUseHostPluginID(t *testing.T) {
+	prefix := "/v0/resource/plugins/xai-autoban-linux-arm64"
+	tests := []struct {
+		name       string
+		request    pluginapi.ManagementRequest
+		wantStatus int
+	}{
+		{name: "status", request: pluginapi.ManagementRequest{Method: http.MethodGet, Path: prefix + "/status"}, wantStatus: http.StatusOK},
+		{name: "data", request: pluginapi.ManagementRequest{Method: http.MethodGet, Path: prefix + "/data"}, wantStatus: http.StatusOK},
+		{name: "action", request: pluginapi.ManagementRequest{Method: http.MethodGet, Path: prefix + "/action"}, wantStatus: http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := dispatchManagement(tt.request)
+			if response.StatusCode != tt.wantStatus {
+				t.Fatalf("unexpected status for %s: got %d want %d body=%s", tt.request.Path, response.StatusCode, tt.wantStatus, response.Body)
+			}
+		})
 	}
 }
 
