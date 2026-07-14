@@ -9,26 +9,49 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
-    container: golang:1.24-bookworm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test
-        run: go test ./...
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Build Linux amd64 plugin
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test and build plugins
+        env:
+          GO_BUILD_IMAGE: golang:1.24-bookworm
         run: |
+          set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
-            -buildvcs=false \
-            -buildmode=c-shared \
-            -trimpath \
-            -ldflags="-s -w" \
-            -o dist/xai-autoban-linux-amd64.so \
-            .
-          sha256sum dist/xai-autoban-linux-amd64.so > dist/SHA256SUMS
+
+          docker run --rm \
+            --platform linux/amd64 \
+            -v "$PWD:/src" \
+            -w /src \
+            "$GO_BUILD_IMAGE" \
+            go test ./...
+
+          for arch in amd64 arm64; do
+            output="dist/xai-autoban-linux-${arch}.so"
+            docker run --rm \
+              --platform "linux/${arch}" \
+              -v "$PWD:/src" \
+              -w /src \
+              -e OUTPUT="$output" \
+              "$GO_BUILD_IMAGE" \
+              sh -ceu 'CGO_ENABLED=1 go build -buildvcs=false -buildmode=c-shared -trimpath -ldflags="-s -w" -o "$OUTPUT" .'
+            echo "Built $output"
+          done
+
+          (
+            cd dist
+            sha256sum xai-autoban-linux-amd64.so xai-autoban-linux-arm64.so > SHA256SUMS
+          )
+          ls -lh dist
+          cat dist/SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -36,4 +59,5 @@ jobs:
           generate_release_notes: true
           files: |
             dist/xai-autoban-linux-amd64.so
+            dist/xai-autoban-linux-arm64.so
             dist/SHA256SUMS
