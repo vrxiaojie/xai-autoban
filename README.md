@@ -48,14 +48,7 @@ CPA 必须启用 Management API，并配置管理密钥：
 
 ```yaml
 remote-management:
-  allow-remote: false
   secret-key: "你的管理密钥"
-```
-
-推荐将同一个明文密钥通过环境变量传给 CPA 进程：
-
-```bash
-export CPA_MANAGEMENT_KEY='你的管理密钥'
 ```
 
 ### 配置方式
@@ -77,11 +70,12 @@ export CPA_MANAGEMENT_KEY='你的管理密钥'
 plugins:
   enabled: true
   configs:
-    xai-autoban:
+  # 下方插件名称需要和你下载的.so文件名一致
+    xai-autoban-linux-amd64:
       enabled: true
       priority: 200
       management-url: http://127.0.0.1:8317
-      management-key-env: CPA_MANAGEMENT_KEY
+      management-key-env: 你的管理密钥 # secret-key
       disable-hours: 24
       status-codes: [401, 402, 403]
       request-timeout-seconds: 10
@@ -112,23 +106,6 @@ pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban vers
 ```
 
 ## 管理面板
-
-```text
-http://<CPA_HOST>:8317/v0/resource/plugins/xai-autoban/status
-```
-
-面板不需要 CPA 管理密钥，可以查看凭据标识并执行解禁。请只在受信网络中开放该路径，或在反向代理层增加访问控制。
-
-公开 Resource API：
-
-```text
-GET /v0/resource/plugins/xai-autoban/data
-GET /v0/resource/plugins/xai-autoban/action?op=unban&auth_id=<AUTH_ID>
-GET /v0/resource/plugins/xai-autoban/action?op=unban-status&status=403
-GET /v0/resource/plugins/xai-autoban/action?op=unban-many&auth_ids=<ID1>,<ID2>
-GET /v0/resource/plugins/xai-autoban/action?op=unban-all
-```
-
 带 CPA 管理鉴权的兼容 API：
 
 ```text
