@@ -58,7 +58,20 @@ remote-management:
 export CPA_MANAGEMENT_KEY='你的管理密钥'
 ```
 
-然后在 `config.yaml` 中启用插件：
+### 配置方式
+
+安装插件后，可以通过下面两种方式完成启用与参数配置，任选其一即可。
+
+| 方式 | 适用场景 |
+| --- | --- |
+| 编辑 `config.yaml` | 适合批量部署、脚本化运维、需要配置完整高级参数 |
+| CPA 插件管理界面 | 适合已在管理后台操作，不想改配置文件 |
+
+两种方式使用的是同一套插件配置字段；保存后由 CPA 加载并交给本插件解析。若你同时改了文件和管理界面，请以当前 CPA 版本的最终生效配置为准。
+
+#### 方式一：编辑 `config.yaml`
+
+在 CPA 的 `config.yaml` 中启用并配置插件：
 
 ```yaml
 plugins:
@@ -78,6 +91,19 @@ plugins:
 ```
 
 也可以使用 `management-key` 直接配置密钥，但不建议把明文密钥提交到 Git。`state-file` 所在目录必须允许 CPA 进程写入。
+
+#### 方式二：在 CPA 插件管理中配置
+
+1. 将 `.so` 安装到对应架构目录后，启动或重启 CLIProxyAPI，确认插件已加载。
+2. 打开 CPA 管理后台中的插件管理页面。
+3. 找到 `xai-autoban`，在表单中填写配置并保存。插件会声明常用字段，例如：
+   - `management-url`
+   - `management-key` / `management-key-env`
+   - `disable-hours`
+   - `status-codes`
+   - `state-file`
+4. 如需 `request-timeout-seconds`、`retry-interval-seconds`、`auth-failure-cooldown-seconds` 等高级项，可在 `config.yaml` 中补充；`enabled`、`priority` 等宿主级开关也以 CPA 插件管理或 `config.yaml` 中的插件宿主配置为准。
+5. 保存后如 CPA 要求，再重启一次使配置生效。
 
 重启 CLIProxyAPI 后，日志应包含：
 
@@ -123,10 +149,9 @@ POST /v0/management/plugins/xai-autoban/import
 
 ## 致谢
 
-本项目基于 [akihitohyh/xai-autoban](https://github.com/akihitohyh/xai-autoban)，并参考 [ysxk/codex-429-autoban](https://github.com/ysxk/codex-429-autoban) 的 CPA 插件 ABI 实现思路。
+- 本项目基于 [akihitohyh/xai-autoban](https://github.com/akihitohyh/xai-autoban)，并参考 [ysxk/codex-429-autoban](https://github.com/ysxk/codex-429-autoban) 的 CPA 插件 ABI 实现思路。
+- 感谢 [linux.do](https://linux.do) 社区的讨论、反馈与支持。
 
 ## License
 
 [MIT](LICENSE)
-
-[linux.do](https://linux.do)
