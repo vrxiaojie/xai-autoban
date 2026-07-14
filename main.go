@@ -39,10 +39,11 @@ import (
 
 const (
 	pluginName    = "xai-autoban"
-	pluginVersion = "1.0.0"
+	pluginVersion = "1.0.1"
 	providerXAI   = "xai"
 
-	managementPrefix = "/plugins/" + pluginName
+	managementPrefix   = "/plugins/" + pluginName
+	resourceBasePrefix = "/v0/resource/plugins/"
 )
 
 var (
@@ -228,7 +229,6 @@ func handleManagement(raw []byte) ([]byte, error) {
 
 func dispatchManagement(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
-	resourcePrefix := "/v0/resource/plugins/" + pluginName
 	switch {
 	case method == http.MethodGet && strings.HasSuffix(strings.TrimRight(req.Path, "/"), managementPrefix+"/bans"):
 		return jsonResponse(http.StatusOK, currentStatus())
@@ -249,15 +249,25 @@ func dispatchManagement(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		return jsonResponse(http.StatusOK, map[string]any{"ok": true, "removed": autoban.requestReleaseAll(), "status": currentStatus()})
 	case method == http.MethodPost && strings.HasSuffix(strings.TrimRight(req.Path, "/"), managementPrefix+"/import"):
 		return importSnapshot(req.Body)
-	case method == http.MethodGet && strings.HasSuffix(strings.TrimRight(req.Path, "/"), resourcePrefix+"/data"):
+	case method == http.MethodGet && matchesResourcePath(req.Path, "data"):
 		return jsonResponse(http.StatusOK, currentStatus())
-	case method == http.MethodGet && strings.HasSuffix(strings.TrimRight(req.Path, "/"), resourcePrefix+"/action"):
+	case method == http.MethodGet && matchesResourcePath(req.Path, "action"):
 		return publicAction(req)
-	case method == http.MethodGet && (strings.HasSuffix(req.Path, resourcePrefix+"/status") || strings.HasSuffix(req.Path, managementPrefix+"/status")):
+	case method == http.MethodGet && (matchesResourcePath(req.Path, "status") || strings.HasSuffix(strings.TrimRight(req.Path, "/"), managementPrefix+"/status")):
 		return pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": {"text/html; charset=utf-8"}}, Body: []byte(statusPage())}
 	default:
 		return jsonResponse(http.StatusNotFound, map[string]any{"error": "not_found"})
 	}
+}
+
+func matchesResourcePath(path, resource string) bool {
+	cleanPath := strings.TrimRight(strings.TrimSpace(path), "/")
+	if !strings.HasPrefix(cleanPath, resourceBasePrefix) {
+		return false
+	}
+	remainder := strings.TrimPrefix(cleanPath, resourceBasePrefix)
+	separator := strings.IndexByte(remainder, '/')
+	return separator > 0 && remainder[separator+1:] == resource
 }
 
 func publicAction(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
@@ -424,7 +434,7 @@ func statusPage() string {
     <p class="footer-note">此页面无需管理密钥。解除操作会立即影响 xAI 凭据调度。</p>
   </main>
   <script>
-    const base='/v0/resource/plugins/xai-autoban';
+    const base=window.location.pathname.replace(/\/status\/?$/,'');
     const state={bans:[],filter:'all',query:'',page:1,pageSize:50,selected:new Set(),timer:null};
     const $=id=>document.getElementById(id);
     const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
