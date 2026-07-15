@@ -54,7 +54,7 @@ func defaultRuntimeConfig() runtimeConfig {
 		ManagementURL:       defaultManagementURL,
 		ManagementKeyEnv:    defaultManagementKeyEnv,
 		DisableDuration:     defaultDisableHours * time.Hour,
-		StatusCodes:         statusCodeSet([]int{401, 402, 403}),
+		StatusCodes:         statusCodeSet([]int{401, 402, 403, 429}),
 		RequestTimeout:      defaultRequestTimeout,
 		RetryInterval:       defaultRetryInterval,
 		AuthFailureCooldown: defaultAuthFailureCooldown,

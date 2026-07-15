@@ -39,7 +39,7 @@ import (
 
 const (
 	pluginName    = "xai-autoban"
-	pluginVersion = "1.0.1"
+	pluginVersion = "1.0.2"
 	providerXAI   = "xai"
 
 	managementPrefix   = "/plugins/" + pluginName
@@ -154,7 +154,7 @@ func pluginRegistration() registration {
 				{Name: "management-key", Type: pluginapi.ConfigFieldTypeString, Description: "CPA Management Key；优先于环境变量。"},
 				{Name: "management-key-env", Type: pluginapi.ConfigFieldTypeString, Description: "Management Key 环境变量名，默认 CPA_MANAGEMENT_KEY。"},
 				{Name: "disable-hours", Type: pluginapi.ConfigFieldTypeInteger, Description: "错误账号停用时长，默认 24 小时。"},
-				{Name: "status-codes", Type: pluginapi.ConfigFieldTypeArray, Description: "触发停用的 HTTP 状态码，默认 401、402、403。"},
+				{Name: "status-codes", Type: pluginapi.ConfigFieldTypeArray, Description: "触发停用的 HTTP 状态码，默认 401、402、403、429。"},
 				{Name: "state-file", Type: pluginapi.ConfigFieldTypeString, Description: "自动恢复状态文件，默认 xai-autoban-state.json。"},
 			},
 		},

@@ -28,6 +28,28 @@ func TestParseRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultRuntimeConfigQueues429(t *testing.T) {
+	state := newBanState()
+	controller := newAutobanController(state)
+	controller.handleUsage(pluginapi.UsageRecord{
+		Provider:  "xai",
+		AuthID:    "rate-limited-auth",
+		AuthIndex: "idx-429",
+		Failed:    true,
+		Failure:   pluginapi.UsageFailure{StatusCode: http.StatusTooManyRequests},
+	})
+
+	state.mu.Lock()
+	entry, ok := state.bans["rate-limited-auth"]
+	state.mu.Unlock()
+	if !ok {
+		t.Fatal("429 response should queue the credential for disabling by default")
+	}
+	if entry.StatusCode != http.StatusTooManyRequests || entry.Reason != "rate_limited" {
+		t.Fatalf("unexpected 429 ban entry: %#v", entry)
+	}
+}
+
 func TestPublicStatusPageHasNoManagementAuthentication(t *testing.T) {
 	page := statusPage()
 	for _, forbidden := range []string{"Authorization: Bearer", "Management key", "/v0/management/plugins/xai-autoban", "/v0/resource/plugins/xai-autoban"} {
