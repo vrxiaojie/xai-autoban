@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          output="dist/xai-autoban-darwin-arm64.so"
+          output="dist/xai-autoban-darwin-arm64.dylib"
           go build \
             -buildvcs=false \
             -buildmode=c-shared \
@@ -112,7 +112,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-arm64-plugin
-          path: dist/xai-autoban-darwin-arm64.so
+          path: dist/xai-autoban-darwin-arm64.dylib
           if-no-files-found: error
 
   publish-release:
@@ -138,7 +138,7 @@ jobs:
           sha256sum \
             xai-autoban-linux-amd64.so \
             xai-autoban-linux-arm64.so \
-            xai-autoban-darwin-arm64.so \
+            xai-autoban-darwin-arm64.dylib \
             > SHA256SUMS
           ls -lh
           cat SHA256SUMS
@@ -150,5 +150,5 @@ jobs:
           files: |
             dist/xai-autoban-linux-amd64.so
             dist/xai-autoban-linux-arm64.so
-            dist/xai-autoban-darwin-arm64.so
+            dist/xai-autoban-darwin-arm64.dylib
             dist/SHA256SUMS
