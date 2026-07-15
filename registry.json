@@ -6,7 +6,7 @@
       "name": "xAI Autoban",
       "description": "Disable failing xAI credentials through the CPA Management API and automatically re-enable them after 24 hours.",
       "author": "vrxiaojie",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "repository": "https://github.com/vrxiaojie/xai-autoban",
       "homepage": "https://github.com/vrxiaojie/xai-autoban",
       "license": "MIT",
@@ -15,7 +15,10 @@
         "scheduler",
         "usage",
         "management"
-      ]
+      ],
+      "install": {
+        "type": "github-release"
+      }
     }
   ]
 }
