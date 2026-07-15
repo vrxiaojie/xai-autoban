@@ -2,6 +2,7 @@ name: Release
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
     branches:
       - "**"
@@ -12,143 +13,224 @@ permissions:
   contents: read
 
 jobs:
-  build-linux:
-    name: Test and build Linux plugins
+  prepare:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify version metadata
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          code_version=$(sed -n 's/.*pluginVersion = "\([^"]*\)".*/\1/p' main.go)
+          registry_version=$(jq -r '.plugins[] | select(.id == "xai-autoban") | .version' registry.json)
+
+          test -n "$code_version"
+          test "$registry_version" != "null"
+          test "$code_version" = "$registry_version"
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            test "$tag_version" = "$code_version"
+          fi
+
+          echo "value=$code_version" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $code_version"
+
+  test:
+    name: Run Go tests
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Test and build Linux plugins
-        env:
-          GO_BUILD_IMAGE: golang:1.24-bookworm
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-
-          docker run --rm \
-            --platform linux/amd64 \
-            -v "$PWD:/src" \
-            -w /src \
-            "$GO_BUILD_IMAGE" \
-            go test ./...
-
-          for arch in amd64 arm64; do
-            output="dist/xai-autoban-linux-${arch}.so"
-            docker run --rm \
-              --platform "linux/${arch}" \
-              -v "$PWD:/src" \
-              -w /src \
-              -e OUTPUT="$output" \
-              "$GO_BUILD_IMAGE" \
-              sh -ceu 'CGO_ENABLED=1 go build -buildvcs=false -buildmode=c-shared -trimpath -ldflags="-s -w" -o "$OUTPUT" .'
-            echo "Built $output"
-          done
-
-      - name: Upload Linux plugins
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-plugins
-          path: |
-            dist/xai-autoban-linux-amd64.so
-            dist/xai-autoban-linux-arm64.so
-          if-no-files-found: error
-
-  build-macos-arm64:
-    name: Test and build macOS arm64 plugin
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
           cache: true
 
-      - name: Test on macOS
-        run: go test ./...
+      - run: go test ./...
 
-      - name: Compile tests for macOS arm64
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs:
+      - prepare
+      - test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: .so
+            cc: gcc
+            install_cc: ""
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: .so
+            cc: aarch64-linux-gnu-gcc
+            install_cc: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            ext: .dylib
+            cc: clang
+            install_cc: ""
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            ext: .dylib
+            cc: clang
+            install_cc: ""
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .dll
+            cc: gcc
+            install_cc: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Install cross compiler
+        if: matrix.install_cc != ''
+        shell: bash
+        run: ${{ matrix.install_cc }}
+
+      - name: Build shared library
+        shell: bash
         env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "1"
-          GOOS: darwin
-          GOARCH: arm64
-          CC: "clang -arch arm64"
+          CC: ${{ matrix.cc }}
         run: |
           set -euo pipefail
-          go test -c -o /tmp/xai-autoban-darwin-arm64.test .
-          lipo /tmp/xai-autoban-darwin-arm64.test -verify_arch arm64
-
-      - name: Build macOS arm64 plugin
-        env:
-          CGO_ENABLED: "1"
-          GOOS: darwin
-          GOARCH: arm64
-          CC: "clang -arch arm64"
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          output="dist/xai-autoban-darwin-arm64.dylib"
+          mkdir -p bin
           go build \
             -buildvcs=false \
             -buildmode=c-shared \
             -trimpath \
             -ldflags="-s -w" \
-            -o "$output" \
+            -o "bin/xai-autoban${{ matrix.ext }}" \
             .
 
-          file "$output"
-          lipo "$output" -verify_arch arm64
-          nm -gU "$output" > /tmp/xai-autoban-darwin-arm64-symbols.txt
-          for symbol in cliproxy_plugin_init cliproxyPluginCall cliproxyPluginFree cliproxyPluginShutdown; do
-            grep -q "_${symbol}$" /tmp/xai-autoban-darwin-arm64-symbols.txt
-          done
-          echo "Built $output"
+      - name: Package Unix plugin
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          zip_name="xai-autoban_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+          mkdir -p dist/package
+          cp "bin/xai-autoban${{ matrix.ext }}" "dist/package/xai-autoban${{ matrix.ext }}"
+          (
+            cd dist/package
+            zip -9 "../${zip_name}" "xai-autoban${{ matrix.ext }}"
+          )
 
-      - name: Upload macOS arm64 plugin
+      - name: Package Windows plugin
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zipName = "xai-autoban_${env:VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+          New-Item -ItemType Directory -Force -Path "dist/package" | Out-Null
+          Copy-Item "bin/xai-autoban${{ matrix.ext }}" "dist/package/xai-autoban${{ matrix.ext }}"
+          Compress-Archive -Path "dist/package/xai-autoban${{ matrix.ext }}" -DestinationPath "dist/$zipName" -CompressionLevel Optimal -Force
+
+      - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: macos-arm64-plugin
-          path: dist/xai-autoban-darwin-arm64.dylib
+          name: plugin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/xai-autoban_*.zip
           if-no-files-found: error
+          retention-days: 30
 
-  publish-release:
-    name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
+  verify-packages:
+    name: Verify CPA store packages
     needs:
-      - build-linux
-      - build-macos-arm64
+      - prepare
+      - build
     runs-on: ubuntu-latest
     steps:
-      - name: Download plugins
+      - uses: actions/checkout@v4
+
+      - name: Download plugin packages
         uses: actions/download-artifact@v4
         with:
-          path: dist
+          path: release-assets
+          pattern: plugin-*
           merge-multiple: true
 
       - name: Generate checksums
+        shell: bash
         run: |
           set -euo pipefail
-          cd dist
-          sha256sum \
-            xai-autoban-linux-amd64.so \
-            xai-autoban-linux-arm64.so \
-            xai-autoban-darwin-arm64.dylib \
-            > SHA256SUMS
-          ls -lh
-          cat SHA256SUMS
+          cd release-assets
+          sha256sum xai-autoban_*.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Verify package layout
+        run: bash scripts/verify-release-assets.sh release-assets "${{ needs.prepare.outputs.version }}"
+
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ needs.prepare.outputs.version }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - prepare
+      - verify-packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ needs.prepare.outputs.version }}
+          path: release-assets
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            dist/xai-autoban-linux-amd64.so
-            dist/xai-autoban-linux-arm64.so
-            dist/xai-autoban-darwin-arm64.dylib
-            dist/SHA256SUMS
+            release-assets/xai-autoban_*.zip
+            release-assets/checksums.txt
+          body: |
+            ## CPA 插件商店安装
+
+            本 Release 已按 CLIProxyAPI plugin-store 约定打包：
+
+            - ZIP 名称：`xai-autoban_{version}_{goos}_{goarch}.zip`
+            - ZIP 根目录：`xai-autoban.so` / `xai-autoban.dll` / `xai-autoban.dylib`
+            - 校验文件：`checksums.txt`
+
+            在 CPA 的 `plugins.store-sources` 中添加：
+
+            `https://raw.githubusercontent.com/vrxiaojie/xai-autoban/main/registry.json`

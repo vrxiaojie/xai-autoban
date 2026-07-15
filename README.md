@@ -38,6 +38,43 @@ dist/xai-autoban-linux-amd64.so
 
 ## 安装
 
+### 推荐：通过 CPA 插件商店安装
+
+在 CPA 的 `config.yaml` 中把本仓库的 `registry.json` 添加为插件商店源：
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"
+  store-sources:
+    - "https://raw.githubusercontent.com/vrxiaojie/xai-autoban/main/registry.json"
+  configs:
+    xai-autoban:
+      enabled: true
+      priority: 200
+      management-url: http://127.0.0.1:8317
+      management-key-env: CPA_MANAGEMENT_KEY
+      disable-hours: 24
+      status-codes: [401, 402, 403, 429]
+      state-file: data/xai-autoban-state.json
+```
+
+保存配置并重启 CPA 后，打开 **管理中心 → 插件商店**，找到 **xAI Autoban** 并点击安装。商店会根据 CPA 所在平台自动下载对应的 GitHub Release ZIP。
+
+商店安装依赖 CPA 能访问 `raw.githubusercontent.com`、`api.github.com` 和 GitHub Release 下载地址。Release 资产支持：
+
+| 平台 | Release 资产 |
+| --- | --- |
+| Windows x86_64 | `xai-autoban_{version}_windows_amd64.zip` |
+| Linux x86_64 | `xai-autoban_{version}_linux_amd64.zip` |
+| Linux ARM64 | `xai-autoban_{version}_linux_arm64.zip` |
+| macOS Intel | `xai-autoban_{version}_darwin_amd64.zip` |
+| macOS Apple Silicon | `xai-autoban_{version}_darwin_arm64.zip` |
+
+每个 ZIP 的根目录都只包含平台对应的 `xai-autoban.so`、`xai-autoban.dll` 或 `xai-autoban.dylib`，Release 同时提供 `checksums.txt` 供 CPA 校验。
+
+### 手动安装
+
 下载与服务器架构对应的文件后，必须将文件名改为 `xai-autoban.so`，再复制到 CPA 插件目录：
 
 ```text
@@ -103,7 +140,7 @@ plugins:
 重启 CLIProxyAPI 后，日志应包含：
 
 ```text
-pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban version=1.0.2
+pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban version=1.0.3
 ```
 
 ## 管理面板
