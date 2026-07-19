@@ -57,10 +57,13 @@ func TestPublicStatusPageHasNoManagementAuthentication(t *testing.T) {
 			t.Fatalf("page still contains authenticated management flow: %q", forbidden)
 		}
 	}
-	for _, required := range []string{"window.location.pathname", "unbanSelected", "unbanStatus", "autoRefresh"} {
+	for _, required := range []string{"window.location.pathname", "unbanSelected", "unbanStatus", "autoRefresh", "deleteOne", "deleteAll403", "data-delete"} {
 		if !strings.Contains(page, required) {
 			t.Fatalf("page is missing %q", required)
 		}
+	}
+	if !strings.Contains(page, "删除账号") || !strings.Contains(page, "删除全部 403") {
+		t.Fatal("page is missing 403 permanent delete controls")
 	}
 }
 
@@ -266,6 +269,152 @@ func TestStateReloadKeepsPendingReenable(t *testing.T) {
 	actions := second.pendingActions(now)
 	if len(actions) != 1 || actions[0].AuthID != "persisted-auth" || actions[0].Disabled {
 		t.Fatalf("unexpected recovery actions: %#v", actions)
+	}
+}
+
+
+func TestPublicDeleteOnlyAllows403(t *testing.T) {
+	bans.clearAll()
+	now := time.Now()
+	bans.set("payment", banEntry{StatusCode: 402, AuthIndex: "idx-402", ResetAt: now.Add(time.Hour)})
+	bans.set("forbidden", banEntry{StatusCode: 403, AuthIndex: "idx-403", ResetAt: now.Add(time.Hour)})
+
+	var deletedNames []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "bad key", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/v0/management/auth-files":
+			deletedNames = append(deletedNames, r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v0/management/auth-files":
+			_, _ = w.Write([]byte(`{"files":[
+				{"id":"payment","auth_index":"idx-402","name":"payment.json","provider":"xai","disabled":true},
+				{"id":"forbidden","auth_index":"idx-403","name":"forbidden.json","provider":"xai","disabled":true}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	controller := newAutobanController(bans)
+	t.Cleanup(controller.shutdown)
+	configYAML := "management-url: " + server.URL + "\nmanagement-key: secret\nstate-file: " + filepath.Join(t.TempDir(), "state.json") + "\n"
+	if err := controller.configure([]byte(configYAML)); err != nil {
+		t.Fatal(err)
+	}
+	autoban = controller
+
+	// 402 should not be deleted by 403-only delete path.
+	deleted, err := controller.deleteCredentials([]string{"payment"}, 403)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("402 credential should not be deleted: %d", deleted)
+	}
+
+	response := publicAction(pluginapi.ManagementRequest{Query: url.Values{"op": {"delete"}, "auth_id": {"forbidden"}}})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", response.StatusCode, response.Body)
+	}
+	status := currentStatus()
+	if status.Count != 1 || status.Bans[0].AuthID != "payment" {
+		t.Fatalf("unexpected bans after delete: %#v", status)
+	}
+	if len(deletedNames) == 0 {
+		t.Fatal("expected management delete call")
+	}
+}
+
+func TestPublicDeleteAll403(t *testing.T) {
+	bans.clearAll()
+	now := time.Now()
+	bans.set("a", banEntry{StatusCode: 403, AuthIndex: "idx-a", ResetAt: now.Add(time.Hour)})
+	bans.set("b", banEntry{StatusCode: 403, AuthIndex: "idx-b", ResetAt: now.Add(time.Hour)})
+	bans.set("c", banEntry{StatusCode: 429, AuthIndex: "idx-c", ResetAt: now.Add(time.Hour)})
+
+	deleteCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "bad key", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/v0/management/auth-files":
+			deleteCount++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v0/management/auth-files":
+			_, _ = w.Write([]byte(`{"files":[
+				{"id":"a","auth_index":"idx-a","name":"a.json","provider":"xai","disabled":true},
+				{"id":"b","auth_index":"idx-b","name":"b.json","provider":"xai","disabled":true},
+				{"id":"c","auth_index":"idx-c","name":"c.json","provider":"xai","disabled":true}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	controller := newAutobanController(bans)
+	t.Cleanup(controller.shutdown)
+	configYAML := "management-url: " + server.URL + "\nmanagement-key: secret\nstate-file: " + filepath.Join(t.TempDir(), "state.json") + "\n"
+	if err := controller.configure([]byte(configYAML)); err != nil {
+		t.Fatal(err)
+	}
+	autoban = controller
+
+	response := publicAction(pluginapi.ManagementRequest{Query: url.Values{"op": {"delete-403"}}})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", response.StatusCode, response.Body)
+	}
+	status := currentStatus()
+	if status.Count != 1 || status.Bans[0].StatusCode != 429 {
+		t.Fatalf("unexpected bans after delete-403: %#v", status)
+	}
+	if deleteCount < 2 {
+		t.Fatalf("expected at least 2 delete calls, got %d", deleteCount)
+	}
+}
+
+func TestManagementClientDeletesByResolvedName(t *testing.T) {
+	var deleted []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "bad key", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/v0/management/auth-files":
+			name := r.URL.Query().Get("name")
+			deleted = append(deleted, name)
+			if name == "runtime-id" {
+				http.Error(w, `{"error":"auth file not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/v0/management/auth-files":
+			_, _ = w.Write([]byte(`{"files":[{"id":"physical-id","auth_index":"idx-1","name":"xai-account.json","provider":"xai","disabled":true}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := defaultRuntimeConfig()
+	cfg.ManagementURL = server.URL
+	cfg.ManagementKey = "secret"
+	client := newManagementClient(cfg)
+	if err := client.deleteAuthFile(context.Background(), "runtime-id", "idx-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) < 2 || deleted[0] != "runtime-id" || deleted[1] != "xai-account.json" {
+		t.Fatalf("unexpected delete targets: %#v", deleted)
 	}
 }
 

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -211,6 +213,83 @@ func (c *autobanController) process() {
 			slog.Info("xai-autoban: credential re-enabled through Management API", "auth_id", action.AuthID)
 		}
 	}
+}
+
+
+// deleteCredentials permanently removes auth files for the given IDs via Management API.
+// Only credentials currently tracked with statusCode are deleted when statusCode > 0.
+// Unlike release/unban, this does not re-enable the credential.
+func (c *autobanController) deleteCredentials(authIDs []string, statusCode int) (int, error) {
+	ids := make([]string, 0, len(authIDs))
+	for _, id := range authIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	c.mu.RLock()
+	client := c.client
+	blockedUntil := c.blockedUntil
+	c.mu.RUnlock()
+	if client == nil {
+		return 0, errors.New("Management API 客户端未初始化")
+	}
+	if time.Now().Before(blockedUntil) {
+		return 0, fmt.Errorf("Management API 冷却中，请稍后再试")
+	}
+
+	entries := c.state.lookup(ids)
+	deleted := 0
+	var firstErr error
+	for _, id := range ids {
+		entry, ok := entries[id]
+		if !ok {
+			continue
+		}
+		if statusCode > 0 && entry.StatusCode != statusCode {
+			continue
+		}
+		err := client.deleteAuthFile(context.Background(), id, entry.AuthIndex)
+		if err != nil {
+			if isManagementAuthError(err) {
+				c.mu.Lock()
+				c.blockedUntil = time.Now().Add(c.cfg.AuthFailureCooldown)
+				c.lastError = err.Error()
+				c.mu.Unlock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				break
+			}
+			slog.Error("xai-autoban: management delete failed", "auth_id", id, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		_ = c.state.clear(id)
+		deleted++
+		slog.Warn("xai-autoban: credential deleted through Management API", "auth_id", id, "status", entry.StatusCode)
+		c.mu.Lock()
+		c.lastError = ""
+		c.mu.Unlock()
+	}
+	if deleted == 0 && firstErr != nil {
+		return 0, firstErr
+	}
+	return deleted, firstErr
+}
+
+func (c *autobanController) deleteByStatus(statusCode int) (int, error) {
+	if statusCode <= 0 {
+		return 0, fmt.Errorf("invalid status code")
+	}
+	ids := c.state.authIDsByStatus(statusCode)
+	return c.deleteCredentials(ids, statusCode)
 }
 
 func (c *autobanController) shutdown() {
