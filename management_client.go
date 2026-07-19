@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -154,6 +155,84 @@ func (c *managementClient) newRequest(ctx context.Context, method, path string, 
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("Accept", "application/json")
 	return req, nil
+}
+
+
+func (c *managementClient) deleteAuthFile(ctx context.Context, authID, authIndex string) error {
+	authID = strings.TrimSpace(authID)
+	if authID == "" {
+		return errors.New("Auth ID 为空")
+	}
+
+	candidates := make([]string, 0, 3)
+	addCandidate := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == name {
+				return
+			}
+		}
+		candidates = append(candidates, name)
+	}
+
+	addCandidate(authID)
+	if file, found, listErr := c.findAuthFile(ctx, authID, authIndex); listErr == nil && found {
+		addCandidate(file.Name)
+		addCandidate(file.ID)
+	} else if listErr != nil && !isManagementAuthError(listErr) {
+		// Prefer attempting delete with known IDs even if listing fails for non-auth reasons.
+	} else if listErr != nil {
+		return listErr
+	}
+
+	var lastErr error
+	for _, name := range candidates {
+		err := c.deleteAuthFileByName(ctx, name)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		var httpErr *managementHTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			continue
+		}
+		if isManagementAuthError(err) {
+			return err
+		}
+	}
+	if lastErr == nil {
+		return errors.New("未找到可删除的账号文件")
+	}
+	// If every candidate was missing, treat as already deleted.
+	var httpErr *managementHTTPError
+	if errors.As(lastErr, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return lastErr
+}
+
+func (c *managementClient) deleteAuthFileByName(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("账号文件名为空")
+	}
+	req, err := c.newRequest(ctx, http.MethodDelete, "/auth-files?name="+url.QueryEscape(name), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("调用 Management API 删除账号失败: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &managementHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(responseBody))}
+	}
+	return nil
 }
 
 func isManagementAuthError(err error) bool {

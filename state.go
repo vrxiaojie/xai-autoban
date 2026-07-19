@@ -290,6 +290,35 @@ func (s *banState) finishAction(action banAction, err error, now time.Time, retr
 	s.persistLocked()
 }
 
+
+func (s *banState) lookup(authIDs []string) map[string]banEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]banEntry)
+	for _, authID := range authIDs {
+		authID = strings.TrimSpace(authID)
+		if authID == "" {
+			continue
+		}
+		if entry, ok := s.bans[authID]; ok {
+			out[authID] = entry
+		}
+	}
+	return out
+}
+
+func (s *banState) authIDsByStatus(status int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0)
+	for authID, entry := range s.bans {
+		if entry.StatusCode == status {
+			out = append(out, authID)
+		}
+	}
+	return out
+}
+
 func (s *banState) persistLocked() {
 	if strings.TrimSpace(s.stateFile) == "" {
 		return

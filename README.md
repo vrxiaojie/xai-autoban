@@ -19,6 +19,7 @@
 - 可通过 `status-codes` 自定义触发停用的 HTTP 状态码。
 - 提供实时统计、搜索、筛选、分页和批量解禁界面。
 - 支持单个、选中项、按状态码和全部解禁。
+- 支持对 `403` 账号一键永久删除（调用 Management API 删除凭据文件，不是解除禁用）。
 - 保留带 CPA 管理密钥保护的 Management API。
 
 ## 构建
@@ -140,7 +141,7 @@ plugins:
 重启 CLIProxyAPI 后，日志应包含：
 
 ```text
-pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban version=1.0.3
+pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban version=1.0.4
 ```
 
 ## 管理面板
@@ -150,6 +151,8 @@ pluginhost: plugin registered plugin_id=xai-autoban plugin_name=xai-autoban vers
 GET  /v0/management/plugins/xai-autoban/bans
 POST /v0/management/plugins/xai-autoban/unban
 POST /v0/management/plugins/xai-autoban/unban-all
+POST /v0/management/plugins/xai-autoban/delete
+POST /v0/management/plugins/xai-autoban/delete-403
 POST /v0/management/plugins/xai-autoban/import
 ```
 
